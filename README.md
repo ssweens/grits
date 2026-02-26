@@ -82,13 +82,23 @@ Errors return a structured envelope:
 
 ## Symbol validation
 
-When claiming a symbol in an existing file with a supported language, grits validates the symbol exists using tree-sitter AST parsing:
+When claiming a symbol in an existing file with a supported language, grits validates the symbol exists using tree-sitter AST parsing. Invalid symbols show grouped available symbols and "did you mean?" suggestions:
 
 ```bash
 grits claim src/lib.rs:nonexistent
 # error: symbol 'nonexistent' not found in src/lib.rs
-# hint: available symbols: validate_email, hash_password, UserService, UserService.new
+# hint: available symbols: User { new, create }, validate_email
+
+grits claim src/lib.rs:valid
+# error: symbol 'valid' not found in src/lib.rs
+# hint: did you mean validate_email? available: User { new, create }, validate_email
+
+grits claim src/lib.rs:user
+# error: symbol 'user' not found in src/lib.rs
+# hint: did you mean User? available: User { new, create }, validate_email
 ```
+
+Suggestions are tiered: qualified form match ("new" → "User.new"), case-insensitive match ("user" → "User"), then prefix match ("valid" → "validate_email").
 
 Symbols use qualified dot notation: `User.new`, `UserService.create`, `Foo.bar`.
 
