@@ -2,10 +2,10 @@
 
 ## Summary
 
-- **44 total tests** (26 unit + 18 integration)
+- **53 total tests** (35 unit + 18 integration)
 - All passing
 
-## Unit tests (26)
+## Unit tests (35)
 
 ### `conflict.rs` (6 tests)
 | Test | Description |
@@ -36,7 +36,7 @@
 |------|-------------|
 | `detect_uses_process_tree` | Detects agent type from process tree, returns non-empty identity |
 
-### `symbols.rs` (13 tests)
+### `symbols.rs` (22 tests)
 | Test | Description |
 |------|-------------|
 | `rust_top_level_fn` | Extracts top-level `fn` names |
@@ -52,6 +52,15 @@
 | `go_method_with_receiver` | `func (f *Foo) Bar()` → `Foo.Bar` |
 | `unsupported_extension_returns_none` | `.csv` → `None` |
 | `no_extension_returns_none` | No extension → `None` |
+| `contains_qualified_name` | `table.contains("User.new")` → true |
+| `contains_unqualified_name` | `table.contains("new")` → true |
+| `contains_nonexistent` | `table.contains("fake")` → false |
+| `suggest_qualified_form` | Query "new" when "User.new" exists → suggests "User.new" |
+| `suggest_case_insensitive` | Query "user" when "User" exists → suggests "User" |
+| `suggest_prefix` | Query "valid" when "validate_email" exists → suggests "validate_email" |
+| `suggest_no_match` | Query "zzz" → empty suggestions |
+| `format_hint_groups_containers` | Groups nested symbols: "User { new }, validate_email" |
+| `format_hint_top_level_only` | No grouping for top-level only: "foo, bar" |
 
 ## Integration tests (18)
 

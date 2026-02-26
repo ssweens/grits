@@ -2,11 +2,162 @@ use std::path::Path;
 
 use tree_sitter::Parser;
 
-/// Extract qualified symbol names from a source file using tree-sitter.
+#[derive(Debug, Clone)]
+pub struct SymbolEntry {
+    pub name: String,
+    pub qualified: Option<String>,
+}
+
+pub struct SymbolTable {
+    entries: Vec<SymbolEntry>,
+}
+
+impl SymbolTable {
+    /// Match by both qualified ("User.new") and unqualified ("new") names.
+    pub fn contains(&self, name: &str) -> bool {
+        self.entries.iter().any(|e| {
+            e.name == name || e.qualified.as_deref() == Some(name)
+        })
+    }
+
+    /// Find suggestions when a symbol isn't found.
+    /// Tier 1: leaf name matches → suggest qualified form
+    /// Tier 2: case-insensitive match on any matchable name
+    /// Tier 3: prefix match on any matchable name
+    pub fn suggest(&self, name: &str) -> Vec<String> {
+        // Tier 1: user typed a leaf name that exists as a qualified entry
+        let qualified: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|e| e.name == name && e.qualified.is_some())
+            .map(|e| e.qualified.clone().unwrap())
+            .collect();
+        if !qualified.is_empty() {
+            return qualified;
+        }
+
+        // Tier 2: case-insensitive match
+        let lower = name.to_lowercase();
+        let case_matches: Vec<String> = self
+            .entries
+            .iter()
+            .flat_map(|e| {
+                let mut v = Vec::new();
+                if e.name.to_lowercase() == lower {
+                    v.push(e.qualified.as_ref().unwrap_or(&e.name).clone());
+                }
+                if let Some(ref q) = e.qualified
+                    && q.to_lowercase() == lower
+                {
+                    v.push(q.clone());
+                }
+                v
+            })
+            .collect();
+        if !case_matches.is_empty() {
+            return dedup_stable(case_matches);
+        }
+
+        // Tier 3: prefix match
+        let prefix_matches: Vec<String> = self
+            .entries
+            .iter()
+            .flat_map(|e| {
+                let mut v = Vec::new();
+                if e.name.starts_with(name) {
+                    v.push(e.qualified.as_ref().unwrap_or(&e.name).clone());
+                }
+                if let Some(ref q) = e.qualified
+                    && q.starts_with(name)
+                {
+                    v.push(q.clone());
+                }
+                v
+            })
+            .collect();
+        dedup_stable(prefix_matches)
+    }
+
+    /// Format symbols grouped by container: "User { new, create }, validate_email"
+    pub fn format_hint(&self) -> String {
+        // First pass: identify all parent names from qualified entries
+        let parent_names: std::collections::HashSet<String> = self
+            .entries
+            .iter()
+            .filter_map(|e| {
+                e.qualified
+                    .as_ref()
+                    .and_then(|q| q.split_once('.'))
+                    .map(|(p, _)| p.to_string())
+            })
+            .collect();
+
+        // Second pass: build groups in insertion order
+        let mut groups: Vec<(Option<String>, Vec<String>)> = Vec::new();
+
+        for entry in &self.entries {
+            if let Some(ref q) = entry.qualified {
+                let parent = q.split_once('.').map(|(p, _)| p.to_string()).unwrap_or_default();
+                if let Some(group) = groups.iter_mut().find(|(p, _)| *p == Some(parent.clone())) {
+                    group.1.push(entry.name.clone());
+                } else {
+                    groups.push((Some(parent), vec![entry.name.clone()]));
+                }
+            } else if !parent_names.contains(&entry.name) {
+                // Top-level symbol that isn't a container — add as standalone
+                // (avoid duplicate standalone entries)
+                let already = groups.iter().any(|(p, children)| {
+                    p.is_none() && children.contains(&entry.name)
+                });
+                if !already {
+                    groups.push((None, vec![entry.name.clone()]));
+                }
+            }
+        }
+
+        groups
+            .iter()
+            .map(|(parent, children)| {
+                if let Some(p) = parent {
+                    format!("{p} {{ {} }}", children.join(", "))
+                } else {
+                    children[0].clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Flat list of all matchable names (for backward-compatible assertions).
+    #[allow(dead_code)]
+    pub fn names(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .entries
+            .iter()
+            .flat_map(|e| {
+                let mut v = vec![e.name.clone()];
+                if let Some(ref q) = e.qualified {
+                    v.push(q.clone());
+                }
+                v
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+fn dedup_stable(mut v: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|s| seen.insert(s.clone()));
+    v
+}
+
+/// Extract symbols from a source file using tree-sitter.
 ///
 /// Returns `None` if the language is unsupported (no grammar available).
-/// Returns `Some(vec)` with both qualified (`User.new`) and unqualified (`new`) names.
-pub fn extract_symbols(file_path: &Path, source: &str) -> Option<Vec<String>> {
+pub fn extract_symbols(file_path: &Path, source: &str) -> Option<SymbolTable> {
     let lang = detect_language(file_path)?;
     let grammar = lang.grammar();
 
@@ -18,35 +169,30 @@ pub fn extract_symbols(file_path: &Path, source: &str) -> Option<Vec<String>> {
     let tree = parser.parse(source, None)?;
     let root = tree.root_node();
 
-    let mut symbols = Vec::new();
-    walk(root, None, source, lang, &mut symbols);
+    let mut entries = Vec::new();
+    walk(root, None, source, lang, &mut entries);
 
-    symbols.sort();
-    symbols.dedup();
-    Some(symbols)
+    Some(SymbolTable { entries })
 }
 
-/// Walk the AST recursively, building qualified symbol names.
+/// Walk the AST recursively, collecting symbol entries with parent context.
 fn walk(
     node: tree_sitter::Node,
     parent_name: Option<&str>,
     source: &str,
     lang: Lang,
-    out: &mut Vec<String>,
+    out: &mut Vec<SymbolEntry>,
 ) {
     let kind = node.kind();
 
     if let Some(def) = classify_node(kind, lang) {
         let name = extract_name(&node, source, lang);
         if let Some(name) = name {
-            // Emit qualified name if we have a parent
-            if let Some(parent) = parent_name {
-                out.push(format!("{parent}.{name}"));
-            }
-            // Always emit the unqualified name
-            out.push(name.clone());
+            out.push(SymbolEntry {
+                name: name.clone(),
+                qualified: parent_name.map(|p| format!("{p}.{name}")),
+            });
 
-            // If this is a container, recurse with this as parent
             if def.is_container {
                 let cursor = &mut node.walk();
                 for child in node.children(cursor) {
@@ -57,7 +203,6 @@ fn walk(
         }
     }
 
-    // Non-definition node or leaf definition: recurse with same parent
     let cursor = &mut node.walk();
     for child in node.children(cursor) {
         walk(child, parent_name, source, lang, out);
@@ -224,7 +369,7 @@ mod tests {
 
     fn symbols(ext: &str, source: &str) -> Vec<String> {
         let path = PathBuf::from(format!("test.{ext}"));
-        extract_symbols(&path, source).unwrap()
+        extract_symbols(&path, source).unwrap().names()
     }
 
     // -- Rust --
@@ -339,5 +484,73 @@ mod tests {
     fn no_extension_returns_none() {
         let path = PathBuf::from("Makefile");
         assert!(extract_symbols(&path, "all: build").is_none());
+    }
+
+    // -- SymbolTable method tests --
+
+    fn table(ext: &str, source: &str) -> SymbolTable {
+        let path = PathBuf::from(format!("test.{ext}"));
+        extract_symbols(&path, source).unwrap()
+    }
+
+    #[test]
+    fn contains_qualified_name() {
+        let t = table("rs", "struct User {}\nimpl User {\n    fn new() -> Self { User {} }\n}");
+        assert!(t.contains("User.new"));
+    }
+
+    #[test]
+    fn contains_unqualified_name() {
+        let t = table("rs", "struct User {}\nimpl User {\n    fn new() -> Self { User {} }\n}");
+        assert!(t.contains("new"));
+    }
+
+    #[test]
+    fn contains_nonexistent() {
+        let t = table("rs", "struct User {}\nimpl User {\n    fn new() -> Self { User {} }\n}");
+        assert!(!t.contains("fake"));
+    }
+
+    #[test]
+    fn suggest_qualified_form() {
+        let t = table("rs", "struct User {}\nimpl User {\n    fn new() -> Self { User {} }\n}");
+        let suggestions = t.suggest("new");
+        assert_eq!(suggestions, vec!["User.new"]);
+    }
+
+    #[test]
+    fn suggest_case_insensitive() {
+        let t = table("rs", "struct User {}");
+        let suggestions = t.suggest("user");
+        assert_eq!(suggestions, vec!["User"]);
+    }
+
+    #[test]
+    fn suggest_prefix() {
+        let t = table("rs", "fn validate_email() {}");
+        let suggestions = t.suggest("valid");
+        assert_eq!(suggestions, vec!["validate_email"]);
+    }
+
+    #[test]
+    fn suggest_no_match() {
+        let t = table("rs", "fn validate_email() {}");
+        let suggestions = t.suggest("zzz");
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn format_hint_groups_containers() {
+        let t = table(
+            "rs",
+            "struct User {}\nimpl User {\n    fn new() -> Self { User {} }\n}\nfn validate_email() {}",
+        );
+        assert_eq!(t.format_hint(), "User { new }, validate_email");
+    }
+
+    #[test]
+    fn format_hint_top_level_only() {
+        let t = table("rs", "fn foo() {}\nfn bar() {}");
+        assert_eq!(t.format_hint(), "foo, bar");
     }
 }

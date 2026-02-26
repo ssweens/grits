@@ -19,12 +19,22 @@ pub fn run(target: &str, json: bool) -> Result<(), GritsError> {
         if file_path.exists() {
             let source = std::fs::read_to_string(&file_path)
                 .map_err(|e| GritsError::io(format!("failed to read {file}: {e}")))?;
-            if let Some(available) = symbols::extract_symbols(&file_path, &source)
-                && !available.contains(sym)
+            if let Some(table) = symbols::extract_symbols(&file_path, &source)
+                && !table.contains(sym)
             {
+                let suggestions = table.suggest(sym);
+                let hint = if suggestions.is_empty() {
+                    format!("available symbols: {}", table.format_hint())
+                } else {
+                    format!(
+                        "did you mean {}? available: {}",
+                        suggestions.join(" or "),
+                        table.format_hint()
+                    )
+                };
                 return Err(GritsError::invalid_input_with_hint(
                     format!("symbol '{sym}' not found in {file}"),
-                    format!("available symbols: {}", available.join(", ")),
+                    hint,
                 ));
             }
         }
