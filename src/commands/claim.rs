@@ -4,6 +4,7 @@ use crate::conflict::check_conflicts;
 use crate::id::generate_id;
 use crate::identity::AgentIdentity;
 use crate::store::{IntentEntry, Store};
+use crate::symbols;
 use crate::{find_root, parse_target, GritsError};
 
 pub fn run(target: &str, json: bool) -> Result<(), GritsError> {
@@ -11,6 +12,23 @@ pub fn run(target: &str, json: bool) -> Result<(), GritsError> {
     let agent = AgentIdentity::detect()?;
     let root = find_root()?;
     let store = Store::open(&root)?;
+
+    // Validate symbol exists in the file (only when file exists and language is supported)
+    if let Some(ref sym) = symbol {
+        let file_path = root.join(&file);
+        if file_path.exists() {
+            let source = std::fs::read_to_string(&file_path)
+                .map_err(|e| GritsError::io(format!("failed to read {file}: {e}")))?;
+            if let Some(available) = symbols::extract_symbols(&file_path, &source)
+                && !available.contains(sym)
+            {
+                return Err(GritsError::invalid_input_with_hint(
+                    format!("symbol '{sym}' not found in {file}"),
+                    format!("available symbols: {}", available.join(", ")),
+                ));
+            }
+        }
+    }
 
     let active = store.active_claims()?;
     let conflicts = check_conflicts(&file, symbol.as_deref(), &active);

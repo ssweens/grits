@@ -80,6 +80,27 @@ Errors return a structured envelope:
 | 2 | Invalid input (retryable) |
 | 3 | IO/system error |
 
+## Symbol validation
+
+When claiming a symbol in an existing file with a supported language, grits validates the symbol exists using tree-sitter AST parsing:
+
+```bash
+grits claim src/lib.rs:nonexistent
+# error: symbol 'nonexistent' not found in src/lib.rs
+# hint: available symbols: validate_email, hash_password, UserService, UserService.new
+```
+
+Symbols use qualified dot notation: `User.new`, `UserService.create`, `Foo.bar`.
+
+**Supported languages:** Rust, TypeScript, JavaScript, Python, Go
+
+**Validation is skipped when:**
+- No symbol is specified (whole-file claim)
+- The file doesn't exist yet (agent may be creating it)
+- The file's language is unsupported (no grammar available)
+
+Only `claim` validates symbols. `check` stays fast — it only reads the store.
+
 ## Conflict rules
 
 - Same file + same symbol = conflict

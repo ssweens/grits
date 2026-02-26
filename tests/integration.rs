@@ -20,6 +20,15 @@ fn setup() -> tempfile::TempDir {
     dir
 }
 
+/// Create a source file in the temp dir and return its relative path.
+fn write_file(dir: &std::path::Path, rel_path: &str, content: &str) {
+    let full = dir.join(rel_path);
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(full, content).unwrap();
+}
+
 /// Extract a claim ID from grits claim output (first whitespace-delimited token).
 fn extract_id(output: &str) -> &str {
     output.split_whitespace().next().unwrap()
@@ -165,4 +174,74 @@ fn prime_outputs_primer() {
     assert!(out.contains("grits check"));
     assert!(out.contains("grits claim"));
     assert!(out.contains("grits release"));
+}
+
+// -- Symbol validation tests --
+
+#[test]
+fn claim_valid_symbol_succeeds() {
+    let dir = setup();
+    write_file(dir.path(), "src/lib.rs", "fn validate_email() {}\nfn hash_password() {}");
+
+    let out = grits(&["claim", "src/lib.rs:validate_email"], dir.path());
+    assert!(out.status.success(), "claiming valid symbol should succeed");
+}
+
+#[test]
+fn claim_invalid_symbol_fails_with_hint() {
+    let dir = setup();
+    write_file(dir.path(), "src/lib.rs", "fn validate_email() {}\nfn hash_password() {}");
+
+    let out = grits(&["claim", "src/lib.rs:nonexistent"], dir.path());
+    assert_eq!(out.status.code(), Some(2), "claiming invalid symbol should exit 2");
+
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("symbol 'nonexistent' not found"), "should say symbol not found: {stderr}");
+    assert!(stderr.contains("validate_email"), "hint should list available symbols: {stderr}");
+    assert!(stderr.contains("hash_password"), "hint should list available symbols: {stderr}");
+}
+
+#[test]
+fn claim_qualified_symbol_succeeds() {
+    let dir = setup();
+    write_file(
+        dir.path(),
+        "src/lib.rs",
+        "struct User {}\nimpl User {\n    fn new() -> Self { User {} }\n}",
+    );
+
+    let out = grits(&["claim", "src/lib.rs:User.new"], dir.path());
+    assert!(out.status.success(), "claiming qualified symbol should succeed");
+}
+
+#[test]
+fn claim_nonexistent_file_skips_validation() {
+    let dir = setup();
+    // Don't create the file — validation should be skipped
+
+    let out = grits(&["claim", "src/new_file.rs:anything"], dir.path());
+    assert!(out.status.success(), "claiming symbol in nonexistent file should succeed");
+}
+
+#[test]
+fn claim_unsupported_language_skips_validation() {
+    let dir = setup();
+    write_file(dir.path(), "data.csv", "id,name\n1,Alice");
+
+    let out = grits(&["claim", "data.csv:anything"], dir.path());
+    assert!(out.status.success(), "claiming symbol in unsupported file type should succeed");
+}
+
+#[test]
+fn claim_invalid_symbol_json_mode() {
+    let dir = setup();
+    write_file(dir.path(), "src/lib.rs", "fn real_fn() {}");
+
+    let out = grits(&["claim", "src/lib.rs:fake_fn", "--json"], dir.path());
+    assert_eq!(out.status.code(), Some(2));
+
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(v["error"], "INVALID_INPUT");
+    assert!(v["hint"].as_str().unwrap().contains("real_fn"));
 }

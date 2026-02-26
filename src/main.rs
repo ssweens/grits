@@ -3,6 +3,7 @@ mod conflict;
 mod id;
 mod identity;
 mod store;
+mod symbols;
 
 use clap::{Parser, Subcommand};
 
@@ -139,6 +140,10 @@ impl GritsError {
 
     pub fn invalid_input(message: String) -> Self {
         Self { code: "INVALID_INPUT", message, hint: None, retryable: true, exit_code: 2 }
+    }
+
+    pub fn invalid_input_with_hint(message: String, hint: String) -> Self {
+        Self { code: "INVALID_INPUT", message, hint: Some(hint), retryable: true, exit_code: 2 }
     }
 
     pub fn io(message: String) -> Self {
