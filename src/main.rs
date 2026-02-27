@@ -65,11 +65,7 @@ enum Command {
     Prime,
 
     /// Initialize grits in the current repository
-    Init {
-        /// Reinitialize even if .grits/ already exists
-        #[arg(long)]
-        force: bool,
-    },
+    Init,
 
     /// Manage agent workflow guidance in AGENTS.md / CLAUDE.md
     Agents {
@@ -80,11 +76,10 @@ enum Command {
         /// Remove grits blurb from agent file
         #[arg(long, conflicts_with = "add")]
         remove: bool,
-
-        /// Skip confirmation prompt
-        #[arg(long)]
-        force: bool,
     },
+
+    /// Remove all grits configuration from the current repository
+    Uninstall,
 }
 
 fn main() {
@@ -98,8 +93,8 @@ fn main() {
         Command::Blame { target } => commands::blame::run(&target, cli.json),
         Command::Log { target, agent } => commands::log::run(target.as_deref(), agent.as_deref(), cli.json),
         Command::Prime => commands::prime::run(),
-        Command::Init { force } => commands::init::run(force, cli.json),
-        Command::Agents { add, remove, force } => {
+        Command::Init => commands::init::run(cli.json),
+        Command::Agents { add, remove } => {
             let mode = if add {
                 commands::agents::Mode::Add
             } else if remove {
@@ -107,8 +102,9 @@ fn main() {
             } else {
                 commands::agents::Mode::Check
             };
-            commands::agents::run(mode, force, cli.json)
+            commands::agents::run(mode, cli.json)
         }
+        Command::Uninstall => commands::uninstall::run(cli.json),
     };
 
     if let Err(e) = result {

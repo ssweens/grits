@@ -48,13 +48,13 @@ pub enum Mode {
     Remove,
 }
 
-pub fn run(mode: Mode, force: bool, json: bool) -> Result<(), GritsError> {
+pub fn run(mode: Mode, json: bool) -> Result<(), GritsError> {
     let root = crate::find_root()?;
 
     match mode {
         Mode::Check => run_check(&root, json),
-        Mode::Add => run_add(&root, force, json),
-        Mode::Remove => run_remove(&root, force, json),
+        Mode::Add => run_add(&root, json),
+        Mode::Remove => run_remove(&root, json),
     }
 }
 
@@ -77,11 +77,11 @@ fn run_check(root: &Path, json: bool) -> Result<(), GritsError> {
             (Some(p), false) => {
                 let name = p.file_name().unwrap().to_string_lossy();
                 println!("{name} — grits blurb NOT present");
-                println!("  run: grits agents --add --force");
+                println!("  run: grits agents --add");
             }
             (None, _) => {
                 println!("no agent file found (AGENTS.md, CLAUDE.md)");
-                println!("  run: grits agents --add --force");
+                println!("  run: grits agents --add");
             }
         }
     }
@@ -89,8 +89,8 @@ fn run_check(root: &Path, json: bool) -> Result<(), GritsError> {
     Ok(())
 }
 
-/// Add mode: create or append agent file with grits blurb.
-fn run_add(root: &Path, force: bool, json: bool) -> Result<(), GritsError> {
+/// Add mode: create or append agent file with grits blurb. Idempotent.
+fn run_add(root: &Path, json: bool) -> Result<(), GritsError> {
     let (existing_path, has_blurb) = find_agent_file(root);
 
     if has_blurb {
@@ -111,26 +111,6 @@ fn run_add(root: &Path, force: bool, json: bool) -> Result<(), GritsError> {
     let target_name = target_path.file_name().unwrap().to_string_lossy().to_string();
     let is_new = !target_path.exists();
 
-    if !force {
-        if json {
-            let output = serde_json::json!({
-                "action": "dry_run",
-                "file": &target_name,
-                "would_create": is_new,
-            });
-            println!("{}", serde_json::to_string(&output).unwrap());
-        } else {
-            if is_new {
-                println!("would create {target_name} with grits blurb");
-            } else {
-                println!("would append grits blurb to {target_name}");
-            }
-            println!("  run: grits agents --add --force");
-        }
-        return Ok(());
-    }
-
-    // Write the blurb
     if is_new {
         fs::write(&target_path, format!("{BLURB}\n"))
             .map_err(|e| GritsError::io(format!("failed to write {target_name}: {e}")))?;
@@ -166,7 +146,7 @@ fn run_add(root: &Path, force: bool, json: bool) -> Result<(), GritsError> {
 }
 
 /// Remove mode: strip grits blurb from agent file.
-fn run_remove(root: &Path, force: bool, json: bool) -> Result<(), GritsError> {
+fn run_remove(root: &Path, json: bool) -> Result<(), GritsError> {
     let (existing_path, has_blurb) = find_agent_file(root);
 
     if !has_blurb {
@@ -185,27 +165,6 @@ fn run_remove(root: &Path, force: bool, json: bool) -> Result<(), GritsError> {
     let path = existing_path.unwrap();
     let name = path.file_name().unwrap().to_string_lossy().to_string();
 
-    if !force {
-        if json {
-            let output = serde_json::json!({
-                "action": "dry_run",
-                "file": &name,
-                "would_remove": true,
-            });
-            println!("{}", serde_json::to_string(&output).unwrap());
-        } else {
-            println!("would remove grits blurb from {name}");
-            println!("  run: grits agents --remove --force");
-        }
-        return Ok(());
-    }
-
-    // Create backup
-    let backup_path = path.with_extension("md.bak");
-    fs::copy(&path, &backup_path)
-        .map_err(|e| GritsError::io(format!("failed to create backup: {e}")))?;
-
-    // Strip the blurb
     let content = fs::read_to_string(&path)
         .map_err(|e| GritsError::io(format!("failed to read {name}: {e}")))?;
 
@@ -218,19 +177,17 @@ fn run_remove(root: &Path, force: bool, json: bool) -> Result<(), GritsError> {
         let output = serde_json::json!({
             "action": "removed",
             "file": &name,
-            "backup": backup_path.file_name().unwrap().to_string_lossy().to_string(),
         });
         println!("{}", serde_json::to_string(&output).unwrap());
     } else {
-        let backup_name = backup_path.file_name().unwrap().to_string_lossy();
-        println!("removed grits blurb from {name} (backup: {backup_name})");
+        println!("removed grits blurb from {name}");
     }
 
     Ok(())
 }
 
 /// Find the first matching agent file and check if it contains the blurb.
-fn find_agent_file(root: &Path) -> (Option<PathBuf>, bool) {
+pub fn find_agent_file(root: &Path) -> (Option<PathBuf>, bool) {
     for name in AGENT_FILES {
         let path = root.join(name);
         if path.exists() {
@@ -243,7 +200,7 @@ fn find_agent_file(root: &Path) -> (Option<PathBuf>, bool) {
 }
 
 /// Remove the grits blurb section (between markers, inclusive) from content.
-fn strip_blurb(content: &str) -> String {
+pub fn strip_blurb(content: &str) -> String {
     let mut result = String::new();
     let mut in_blurb = false;
 

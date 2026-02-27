@@ -278,7 +278,6 @@ fn init_creates_grits_dir() {
 fn init_configures_mergiraf_when_available() {
     let dir = setup_git_repo();
 
-    // Only test mergiraf config if mergiraf is on PATH
     let mergiraf_available = Command::new("mergiraf")
         .arg("--version")
         .output()
@@ -304,7 +303,6 @@ fn init_configures_mergiraf_when_available() {
 fn init_writes_gitattributes() {
     let dir = setup_git_repo();
 
-    // Only test gitattributes if mergiraf is on PATH
     let mergiraf_available = Command::new("mergiraf")
         .arg("--version")
         .output()
@@ -350,7 +348,6 @@ fn init_sets_diff3() {
 fn init_succeeds_without_mergiraf() {
     let dir = setup_git_repo();
 
-    // Init always succeeds — just warns if mergiraf is missing
     let out = grits(&["init"], dir.path());
     assert!(out.status.success());
 
@@ -360,27 +357,14 @@ fn init_succeeds_without_mergiraf() {
 }
 
 #[test]
-fn init_already_initialized_fails() {
+fn init_is_idempotent() {
     let dir = setup_git_repo();
 
     let first = grits(&["init"], dir.path());
     assert!(first.status.success());
 
     let second = grits(&["init"], dir.path());
-    assert_eq!(second.status.code(), Some(2), "second init should fail without --force");
-
-    let stderr = String::from_utf8(second.stderr).unwrap();
-    assert!(stderr.contains("already exists"));
-}
-
-#[test]
-fn init_force_reinitializes() {
-    let dir = setup_git_repo();
-
-    grits(&["init"], dir.path());
-
-    let out = grits(&["init", "--force"], dir.path());
-    assert!(out.status.success(), "init --force should succeed on re-init");
+    assert!(second.status.success(), "running init twice should just work");
 }
 
 #[test]
@@ -407,7 +391,7 @@ fn agents_check_no_file() {
 fn agents_add_creates_file() {
     let dir = setup_git_repo();
 
-    let out = grits(&["agents", "--add", "--force"], dir.path());
+    let out = grits(&["agents", "--add"], dir.path());
     assert!(out.status.success());
 
     let agents_md = dir.path().join("AGENTS.md");
@@ -424,10 +408,9 @@ fn agents_add_creates_file() {
 fn agents_add_appends_to_existing() {
     let dir = setup_git_repo();
 
-    // Create an existing AGENTS.md
     write_file(dir.path(), "AGENTS.md", "# Existing content\n\nSome rules.\n");
 
-    let out = grits(&["agents", "--add", "--force"], dir.path());
+    let out = grits(&["agents", "--add"], dir.path());
     assert!(out.status.success());
 
     let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
@@ -439,18 +422,17 @@ fn agents_add_appends_to_existing() {
 fn agents_remove_strips_blurb() {
     let dir = setup_git_repo();
 
-    // Add then remove
-    grits(&["agents", "--add", "--force"], dir.path());
+    grits(&["agents", "--add"], dir.path());
     assert!(dir.path().join("AGENTS.md").exists());
 
-    let out = grits(&["agents", "--remove", "--force"], dir.path());
+    let out = grits(&["agents", "--remove"], dir.path());
     assert!(out.status.success());
 
-    // Backup should exist
-    assert!(dir.path().join("AGENTS.md.bak").exists());
+    // No .bak files
+    assert!(!dir.path().join("AGENTS.md.bak").exists());
 
     // Blurb should be gone
-    let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap_or_default();
     assert!(!content.contains("grits-agent-instructions-v1"));
 }
 
@@ -458,10 +440,10 @@ fn agents_remove_strips_blurb() {
 fn agents_add_idempotent() {
     let dir = setup_git_repo();
 
-    grits(&["agents", "--add", "--force"], dir.path());
+    grits(&["agents", "--add"], dir.path());
     let first_content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
 
-    let out = grits(&["agents", "--add", "--force"], dir.path());
+    let out = grits(&["agents", "--add"], dir.path());
     assert!(out.status.success());
 
     let second_content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
@@ -469,4 +451,79 @@ fn agents_add_idempotent() {
 
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("already present"));
+}
+
+// -- Uninstall tests --
+
+#[test]
+fn uninstall_reverses_init() {
+    let dir = setup_git_repo();
+
+    grits(&["init"], dir.path());
+    assert!(dir.path().join(".grits").is_dir());
+
+    let out = grits(&["uninstall"], dir.path());
+    assert!(out.status.success());
+
+    assert!(!dir.path().join(".grits").exists(), ".grits/ should be removed");
+
+    // Mergiraf config should be gone (if it was set)
+    let driver = Command::new("git")
+        .args(["config", "--get", "merge.mergiraf.driver"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(!driver.status.success(), "mergiraf driver should be unset");
+}
+
+#[test]
+fn uninstall_reverses_agents() {
+    let dir = setup_git_repo();
+
+    grits(&["agents", "--add"], dir.path());
+    assert!(dir.path().join("AGENTS.md").exists());
+
+    let out = grits(&["uninstall"], dir.path());
+    assert!(out.status.success());
+
+    // AGENTS.md was only the blurb, so it should be removed entirely
+    assert!(!dir.path().join("AGENTS.md").exists());
+}
+
+#[test]
+fn uninstall_preserves_non_grits_content() {
+    let dir = setup_git_repo();
+
+    write_file(dir.path(), "AGENTS.md", "# Team rules\n\nBe nice.\n");
+    grits(&["agents", "--add"], dir.path());
+
+    let out = grits(&["uninstall"], dir.path());
+    assert!(out.status.success());
+
+    // AGENTS.md should still exist with original content
+    let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+    assert!(content.contains("Team rules"));
+    assert!(!content.contains("grits-agent-instructions-v1"));
+}
+
+#[test]
+fn uninstall_nothing_is_noop() {
+    let dir = setup_git_repo();
+
+    let out = grits(&["uninstall"], dir.path());
+    assert!(out.status.success());
+
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("nothing to uninstall"));
+}
+
+#[test]
+fn uninstall_json_mode() {
+    let dir = setup_git_repo();
+
+    grits(&["init"], dir.path());
+
+    let out = grits_stdout(&["uninstall", "--json"], dir.path());
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["uninstalled"], true);
 }

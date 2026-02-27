@@ -1,6 +1,6 @@
 # Grits
 
-Intent WAL for parallel AI agent coordination. A single Rust binary with 9 subcommands that read/append to a JSONL file. No database, no daemon.
+Intent WAL for parallel AI agent coordination. A single Rust binary with 10 subcommands that read/append to a JSONL file. No database, no daemon.
 
 ## Install
 
@@ -15,12 +15,14 @@ cargo install --path .
 grits init
 
 # Inject agent workflow guidance into AGENTS.md
-grits agents --add --force
+grits agents --add
 ```
 
-`grits init` creates the `.grits/` directory and, if [mergiraf](https://mergiraf.org) is on PATH, configures it as an AST-aware git merge driver. Mergiraf resolves structural conflicts (like parallel import additions) that standard git cannot. If mergiraf isn't installed, init still succeeds — just skips merge driver setup.
+`grits init` creates the `.grits/` directory and, if [mergiraf](https://mergiraf.org) is on PATH, configures it as an AST-aware git merge driver. Mergiraf resolves structural conflicts (like parallel import additions) that standard git cannot. If mergiraf isn't installed, init still succeeds — just skips merge driver setup. Running init again is safe (idempotent).
 
-`grits agents --add` creates or appends workflow guidance to AGENTS.md (or CLAUDE.md if one exists). Use `--remove` to strip it. Use `--force` to skip confirmation.
+`grits agents --add` creates or appends workflow guidance to AGENTS.md (or CLAUDE.md if one exists). Use `--remove` to strip it.
+
+`grits uninstall` reverses everything — removes `.grits/`, unsets git config, strips mergiraf from `.gitattributes`, and removes the agent blurb.
 
 ## How it works
 
@@ -63,12 +65,14 @@ grits prime
 
 # Initialize grits + mergiraf merge driver
 grits init
-grits init --force   # reinitialize
 
 # Manage agent file guidance
-grits agents              # check status
-grits agents --add --force   # add blurb to AGENTS.md
-grits agents --remove --force   # strip blurb
+grits agents           # check status
+grits agents --add     # add blurb to AGENTS.md
+grits agents --remove  # strip blurb
+
+# Remove all grits configuration
+grits uninstall
 ```
 
 ## JSON mode
@@ -158,7 +162,7 @@ Only `claim` validates symbols. `check` stays fast — it only reads the store.
 
 ### CLAUDE.md / AGENTS.md
 
-Use `grits agents --add --force` to inject the workflow blurb, or add manually:
+Use `grits agents --add` to inject the workflow blurb, or add manually:
 
 ```markdown
 ## File Coordination (grits)

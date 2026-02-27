@@ -7,3 +7,4 @@ pub mod log;
 pub mod prime;
 pub mod release;
 pub mod status;
+pub mod uninstall;

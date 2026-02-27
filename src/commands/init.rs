@@ -9,21 +9,13 @@ const MERGIRAF_EXTENSIONS: &[&str] = &["*.rs", "*.ts", "*.tsx", "*.js", "*.jsx",
 
 const GITIGNORE_CONTENT: &str = "*.lock\n*.tmp\n";
 
-const GITATTRIBUTES_HEADER: &str = "# grits: AST-aware merging via mergiraf";
+pub const GITATTRIBUTES_HEADER: &str = "# grits: AST-aware merging via mergiraf";
 
-pub fn run(force: bool, json: bool) -> Result<(), GritsError> {
+pub fn run(json: bool) -> Result<(), GritsError> {
     let root = crate::find_root()?;
     let grits_dir = root.join(".grits");
 
-    // Check if already initialized
-    if grits_dir.exists() && !force {
-        return Err(GritsError::invalid_input_with_hint(
-            ".grits/ already exists".to_string(),
-            "use --force to reinitialize".to_string(),
-        ));
-    }
-
-    // Create .grits/ directory
+    // Create .grits/ directory (idempotent)
     fs::create_dir_all(&grits_dir)
         .map_err(|e| GritsError::io(format!("failed to create .grits/: {e}")))?;
 
@@ -48,7 +40,7 @@ pub fn run(force: bool, json: bool) -> Result<(), GritsError> {
         steps.push(format!("  [+] .gitattributes — mergiraf for {}", exts.join(", ")));
     } else {
         steps.push("  [!] mergiraf not found — install with: cargo install --locked mergiraf".to_string());
-        steps.push("      Then re-run: grits init --force".to_string());
+        steps.push("      Then re-run: grits init".to_string());
     }
 
     if json {
@@ -69,7 +61,7 @@ pub fn run(force: bool, json: bool) -> Result<(), GritsError> {
         }
         println!();
         println!("Next steps:");
-        println!("  grits agents --add --force   # inject workflow guidance into AGENTS.md");
+        println!("  grits agents --add   # inject workflow guidance into AGENTS.md");
         println!("  grits claim <file>:<symbol>  # start coordinating");
     }
 

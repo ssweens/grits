@@ -2,7 +2,7 @@
 
 ## Summary
 
-- **66 total tests** (35 unit + 31 integration)
+- **70 total tests** (35 unit + 35 integration)
 - All passing
 
 ## Unit tests (35)
@@ -62,7 +62,7 @@
 | `format_hint_groups_containers` | Groups nested symbols: "User { new }, validate_email" |
 | `format_hint_top_level_only` | No grouping for top-level only: "foo, bar" |
 
-## Integration tests (31)
+## Integration tests (35)
 
 All integration tests run the compiled `grits` binary against a temp directory with a fresh git repo.
 
@@ -91,11 +91,15 @@ All integration tests run the compiled `grits` binary against a temp directory w
 | `init_writes_gitattributes` | Creates `.gitattributes` with mergiraf mappings |
 | `init_sets_diff3` | Sets `merge.conflictStyle = diff3` |
 | `init_succeeds_without_mergiraf` | Still succeeds and warns when mergiraf missing |
-| `init_already_initialized_fails` | Second init without `--force` exits with error |
-| `init_force_reinitializes` | `--force` succeeds on already-initialized project |
+| `init_is_idempotent` | Running init twice succeeds (no --force needed) |
 | `init_json_mode` | Structured JSON output |
 | `agents_check_no_file` | Reports no agent file found |
-| `agents_add_creates_file` | `--add --force` creates AGENTS.md with blurb |
+| `agents_add_creates_file` | `--add` creates AGENTS.md with blurb |
 | `agents_add_appends_to_existing` | Appends blurb to existing AGENTS.md |
-| `agents_remove_strips_blurb` | `--remove --force` removes blurb, creates .bak |
+| `agents_remove_strips_blurb` | `--remove` removes blurb cleanly |
 | `agents_add_idempotent` | Second `--add` is no-op when blurb present |
+| `uninstall_reverses_init` | Removes `.grits/`, unsets git config |
+| `uninstall_reverses_agents` | Removes AGENTS.md when it only contained blurb |
+| `uninstall_preserves_non_grits_content` | Strips blurb but keeps other content in AGENTS.md |
+| `uninstall_nothing_is_noop` | Clean repo prints "nothing to uninstall" |
+| `uninstall_json_mode` | Structured JSON output |
