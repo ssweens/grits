@@ -2,7 +2,7 @@
 
 ## Summary
 
-- **53 total tests** (35 unit + 18 integration)
+- **66 total tests** (35 unit + 31 integration)
 - All passing
 
 ## Unit tests (35)
@@ -62,9 +62,9 @@
 | `format_hint_groups_containers` | Groups nested symbols: "User { new }, validate_email" |
 | `format_hint_top_level_only` | No grouping for top-level only: "foo, bar" |
 
-## Integration tests (18)
+## Integration tests (31)
 
-All integration tests run the compiled `grits` binary against a temp directory with a fresh `.grits/intents.jsonl`.
+All integration tests run the compiled `grits` binary against a temp directory with a fresh git repo.
 
 | Test | Description |
 |------|-------------|
@@ -86,3 +86,16 @@ All integration tests run the compiled `grits` binary against a temp directory w
 | `claim_nonexistent_file_skips_validation` | Claim in nonexistent file passes (skip validation) |
 | `claim_unsupported_language_skips_validation` | Claim in .csv file passes (skip validation) |
 | `claim_invalid_symbol_json_mode` | JSON error envelope includes hint with available symbols |
+| `init_creates_grits_dir` | Creates `.grits/` and `.grits/.gitignore` |
+| `init_configures_mergiraf_when_available` | When mergiraf on PATH, sets merge driver in `.git/config` |
+| `init_writes_gitattributes` | Creates `.gitattributes` with mergiraf mappings |
+| `init_sets_diff3` | Sets `merge.conflictStyle = diff3` |
+| `init_succeeds_without_mergiraf` | Still succeeds and warns when mergiraf missing |
+| `init_already_initialized_fails` | Second init without `--force` exits with error |
+| `init_force_reinitializes` | `--force` succeeds on already-initialized project |
+| `init_json_mode` | Structured JSON output |
+| `agents_check_no_file` | Reports no agent file found |
+| `agents_add_creates_file` | `--add --force` creates AGENTS.md with blurb |
+| `agents_add_appends_to_existing` | Appends blurb to existing AGENTS.md |
+| `agents_remove_strips_blurb` | `--remove --force` removes blurb, creates .bak |
+| `agents_add_idempotent` | Second `--add` is no-op when blurb present |

@@ -1,6 +1,8 @@
+pub mod agents;
 pub mod blame;
 pub mod check;
 pub mod claim;
+pub mod init;
 pub mod log;
 pub mod prime;
 pub mod release;

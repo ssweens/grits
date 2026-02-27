@@ -20,6 +20,17 @@ fn setup() -> tempfile::TempDir {
     dir
 }
 
+/// Setup with a real git repo (needed for `git config` commands in init).
+fn setup_git_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .expect("failed to git init");
+    dir
+}
+
 /// Create a source file in the temp dir and return its relative path.
 fn write_file(dir: &std::path::Path, rel_path: &str, content: &str) {
     let full = dir.join(rel_path);
@@ -244,4 +255,218 @@ fn claim_invalid_symbol_json_mode() {
     let v: serde_json::Value = serde_json::from_str(&stderr).unwrap();
     assert_eq!(v["error"], "INVALID_INPUT");
     assert!(v["hint"].as_str().unwrap().contains("real_fn"));
+}
+
+// -- Init tests --
+
+#[test]
+fn init_creates_grits_dir() {
+    let dir = setup_git_repo();
+
+    let out = grits(&["init"], dir.path());
+    assert!(out.status.success(), "init should succeed");
+
+    assert!(dir.path().join(".grits").is_dir());
+    assert!(dir.path().join(".grits/.gitignore").exists());
+
+    let gitignore = std::fs::read_to_string(dir.path().join(".grits/.gitignore")).unwrap();
+    assert!(gitignore.contains("*.lock"));
+    assert!(gitignore.contains("*.tmp"));
+}
+
+#[test]
+fn init_configures_mergiraf_when_available() {
+    let dir = setup_git_repo();
+
+    // Only test mergiraf config if mergiraf is on PATH
+    let mergiraf_available = Command::new("mergiraf")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let out = grits(&["init"], dir.path());
+    assert!(out.status.success());
+
+    if mergiraf_available {
+        let driver = Command::new("git")
+            .args(["config", "--get", "merge.mergiraf.driver"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(driver.status.success(), "mergiraf driver should be configured");
+        let driver_val = String::from_utf8(driver.stdout).unwrap();
+        assert!(driver_val.contains("mergiraf merge"), "driver should invoke mergiraf merge");
+    }
+}
+
+#[test]
+fn init_writes_gitattributes() {
+    let dir = setup_git_repo();
+
+    // Only test gitattributes if mergiraf is on PATH
+    let mergiraf_available = Command::new("mergiraf")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    grits(&["init"], dir.path());
+
+    if mergiraf_available {
+        let attrs = std::fs::read_to_string(dir.path().join(".gitattributes")).unwrap();
+        assert!(attrs.contains("*.rs merge=mergiraf"));
+        assert!(attrs.contains("*.ts merge=mergiraf"));
+        assert!(attrs.contains("*.py merge=mergiraf"));
+        assert!(attrs.contains("*.go merge=mergiraf"));
+    }
+}
+
+#[test]
+fn init_sets_diff3() {
+    let dir = setup_git_repo();
+
+    let mergiraf_available = Command::new("mergiraf")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    grits(&["init"], dir.path());
+
+    if mergiraf_available {
+        let style = Command::new("git")
+            .args(["config", "--get", "merge.conflictStyle"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(style.status.success());
+        let val = String::from_utf8(style.stdout).unwrap();
+        assert_eq!(val.trim(), "diff3");
+    }
+}
+
+#[test]
+fn init_succeeds_without_mergiraf() {
+    let dir = setup_git_repo();
+
+    // Init always succeeds — just warns if mergiraf is missing
+    let out = grits(&["init"], dir.path());
+    assert!(out.status.success());
+
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("Initialized grits"));
+    assert!(dir.path().join(".grits").is_dir());
+}
+
+#[test]
+fn init_already_initialized_fails() {
+    let dir = setup_git_repo();
+
+    let first = grits(&["init"], dir.path());
+    assert!(first.status.success());
+
+    let second = grits(&["init"], dir.path());
+    assert_eq!(second.status.code(), Some(2), "second init should fail without --force");
+
+    let stderr = String::from_utf8(second.stderr).unwrap();
+    assert!(stderr.contains("already exists"));
+}
+
+#[test]
+fn init_force_reinitializes() {
+    let dir = setup_git_repo();
+
+    grits(&["init"], dir.path());
+
+    let out = grits(&["init", "--force"], dir.path());
+    assert!(out.status.success(), "init --force should succeed on re-init");
+}
+
+#[test]
+fn init_json_mode() {
+    let dir = setup_git_repo();
+
+    let out = grits_stdout(&["init", "--json"], dir.path());
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["initialized"], true);
+    assert_eq!(v["path"], ".grits/");
+}
+
+// -- Agents tests --
+
+#[test]
+fn agents_check_no_file() {
+    let dir = setup_git_repo();
+
+    let out = grits_stdout(&["agents"], dir.path());
+    assert!(out.contains("no agent file found"));
+}
+
+#[test]
+fn agents_add_creates_file() {
+    let dir = setup_git_repo();
+
+    let out = grits(&["agents", "--add", "--force"], dir.path());
+    assert!(out.status.success());
+
+    let agents_md = dir.path().join("AGENTS.md");
+    assert!(agents_md.exists(), "AGENTS.md should be created");
+
+    let content = std::fs::read_to_string(&agents_md).unwrap();
+    assert!(content.contains("grits-agent-instructions-v1"));
+    assert!(content.contains("grits check"));
+    assert!(content.contains("grits claim"));
+    assert!(content.contains("grits release"));
+}
+
+#[test]
+fn agents_add_appends_to_existing() {
+    let dir = setup_git_repo();
+
+    // Create an existing AGENTS.md
+    write_file(dir.path(), "AGENTS.md", "# Existing content\n\nSome rules.\n");
+
+    let out = grits(&["agents", "--add", "--force"], dir.path());
+    assert!(out.status.success());
+
+    let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+    assert!(content.starts_with("# Existing content"), "should preserve original content");
+    assert!(content.contains("grits-agent-instructions-v1"), "should have blurb");
+}
+
+#[test]
+fn agents_remove_strips_blurb() {
+    let dir = setup_git_repo();
+
+    // Add then remove
+    grits(&["agents", "--add", "--force"], dir.path());
+    assert!(dir.path().join("AGENTS.md").exists());
+
+    let out = grits(&["agents", "--remove", "--force"], dir.path());
+    assert!(out.status.success());
+
+    // Backup should exist
+    assert!(dir.path().join("AGENTS.md.bak").exists());
+
+    // Blurb should be gone
+    let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+    assert!(!content.contains("grits-agent-instructions-v1"));
+}
+
+#[test]
+fn agents_add_idempotent() {
+    let dir = setup_git_repo();
+
+    grits(&["agents", "--add", "--force"], dir.path());
+    let first_content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+
+    let out = grits(&["agents", "--add", "--force"], dir.path());
+    assert!(out.status.success());
+
+    let second_content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+    assert_eq!(first_content, second_content, "second --add should be no-op");
+
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("already present"));
 }
