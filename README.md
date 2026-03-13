@@ -1,6 +1,6 @@
 # Grits
 
-Intent WAL for parallel AI agent coordination. A single Rust binary with 10 subcommands that read/append to a JSONL file. No database, no daemon.
+Playing with a subagent coordination system that makes things merge-proof so subagents can't step on each other.  You sort of checkout symbols instead of files and create a WAL like you would in a database.  A single Rust binary with 10 subcommands that read/append to a JSONL file. No database, no daemon.  Some inspiration from Beads.
 
 ## Install
 
